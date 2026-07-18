@@ -15,7 +15,7 @@ This project is a custom, multi-threaded Deep Packet Inspection (DPI) Engine wri
 ## Build Instructions
 This project utilizes CMake for cross-platform compilation. 
 -----------------------------------------------------
-## Commond line useage
+## Command line useage
 ```bash
 mkdir build
 cd build
