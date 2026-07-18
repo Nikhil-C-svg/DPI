@@ -1,0 +1,10 @@
+^C:\USERS\NIKHI\PACKET_ANALYZER\BUILD\CMAKEFILES\F64C5717ED76841E4F453316C9AA8AAE\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/nikhi/Packet_analyzer -BC:/Users/nikhi/Packet_analyzer/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/nikhi/Packet_analyzer/build/PacketAnalyzer.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
