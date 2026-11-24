@@ -12,7 +12,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
-#include <chrono>
 #include <iomanip>
 #include <algorithm>
 #include <optional>
@@ -41,12 +40,9 @@ public:
         not_empty_.notify_one();
     }
     
-    std::optional<T> pop(int timeout_ms = 100) {
+    std::optional<T> pop() {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (!not_empty_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-                                  [this] { return !queue_.empty() || shutdown_; })) {
-            return std::nullopt;
-        }
+        not_empty_.wait(lock, [this] { return !queue_.empty() || shutdown_; });
         if (queue_.empty()) return std::nullopt;
         T item = std::move(queue_.front());
         queue_.pop();
@@ -61,20 +57,13 @@ public:
         not_full_.notify_all();
     }
     
-    size_t size() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return queue_.size();
-    }
-    
-    bool is_shutdown() const { return shutdown_; }
-
 private:
     std::queue<T> queue_;
-    mutable std::mutex mutex_;
+    std::mutex mutex_;
     std::condition_variable not_empty_;
     std::condition_variable not_full_;
     size_t max_size_;
-    std::atomic<bool> shutdown_;
+    bool shutdown_;
 };
 
 // =============================================================================
@@ -194,12 +183,10 @@ public:
         : id_(id), rules_(rules), stats_(stats), output_queue_(output_queue) {}
     
     void start() {
-        running_ = true;
         thread_ = std::thread(&FastPath::run, this);
     }
     
     void stop() {
-        running_ = false;
         input_queue_.shutdown();
         if (thread_.joinable()) thread_.join();
     }
@@ -216,14 +203,11 @@ private:
     TSQueue<Packet> input_queue_;
     std::unordered_map<FiveTuple, FlowEntry, FiveTupleHash> flows_;
     
-    std::atomic<bool> running_{false};
     std::thread thread_;
     std::atomic<uint64_t> processed_{0};
     
     void run() {
-        while (running_) {
-            auto pkt_opt = input_queue_.pop(100);
-            if (!pkt_opt) continue;
+        while (auto pkt_opt = input_queue_.pop()) {
             
             processed_++;
             Packet& pkt = *pkt_opt;
@@ -309,12 +293,10 @@ public:
         : id_(id), fps_(std::move(fps)), num_fps_(fps_.size()) {}
     
     void start() {
-        running_ = true;
         thread_ = std::thread(&LoadBalancer::run, this);
     }
     
     void stop() {
-        running_ = false;
         input_queue_.shutdown();
         if (thread_.joinable()) thread_.join();
     }
@@ -329,14 +311,11 @@ private:
     size_t num_fps_;
     TSQueue<Packet> input_queue_;
     
-    std::atomic<bool> running_{false};
     std::thread thread_;
     std::atomic<uint64_t> dispatched_{0};
     
     void run() {
-        while (running_) {
-            auto pkt_opt = input_queue_.pop(100);
-            if (!pkt_opt) continue;
+        while (auto pkt_opt = input_queue_.pop()) {
             
             // Hash to select FP
             FiveTupleHash hasher;
@@ -411,11 +390,8 @@ public:
         for (auto& lb : lbs_) lb->start();
         
         // Start output writer thread
-        std::atomic<bool> output_running{true};
         std::thread output_thread([&]() {
-            while (output_running || output_queue_.size() > 0) {
-                auto pkt_opt = output_queue_.pop(50);
-                if (!pkt_opt) continue;
+            while (auto pkt_opt = output_queue_.pop()) {
                 
                 PcapPacketHeader phdr;
                 phdr.ts_sec = pkt_opt->ts_sec;
@@ -498,26 +474,77 @@ public:
         std::cout << "[Reader] Done reading " << pkt_id << " packets\n";
         reader.close();
         
-        // Wait for queues to drain
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        
-        // Stop all threads
+        // Drain each stage while its consumers are still running.
         for (auto& lb : lbs_) lb->stop();
         for (auto& fp : fps_) fp->stop();
         
-        output_running = false;
         output_queue_.shutdown();
         output_thread.join();
         
         output.close();
-        
+        if (!output) {
+            std::cerr << "Could not write the output capture\n";
+            return false;
+        }
+
         // Print report
         printReport();
         
         return true;
     }
 
+    bool writeJsonReport(const std::string& path) {
+        std::ofstream report(path, std::ios::binary);
+        report << "{\"total_packets\":" << stats_.total_packets.load()
+               << ",\"total_bytes\":" << stats_.total_bytes.load()
+               << ",\"tcp_packets\":" << stats_.tcp_packets.load()
+               << ",\"udp_packets\":" << stats_.udp_packets.load()
+               << ",\"forwarded\":" << stats_.forwarded.load()
+               << ",\"dropped\":" << stats_.dropped.load()
+               << ",\"applications\":{";
+
+        bool comma = false;
+        for (const auto& [app, count] : stats_.app_counts) {
+            if (comma) report << ',';
+            writeJsonString(report, appTypeToString(app));
+            report << ':' << count;
+            comma = true;
+        }
+
+        report << "},\"domains\":[";
+        comma = false;
+        for (const auto& [domain, app] : stats_.detected_snis) {
+            if (comma) report << ',';
+            report << "{\"name\":";
+            writeJsonString(report, domain);
+            report << ",\"application\":";
+            writeJsonString(report, appTypeToString(app));
+            report << '}';
+            comma = true;
+        }
+
+        report << "]}\n";
+        report.close();
+        return static_cast<bool>(report);
+    }
+
 private:
+    // Encode untrusted host bytes as JSON string content. DNS names on the wire use ASCII.
+    static void writeJsonString(std::ostream& out, const std::string& value) {
+        constexpr char hex[] = "0123456789abcdef";
+        out << '"';
+        for (unsigned char byte : value) {
+            if (byte == '"' || byte == '\\') {
+                out << '\\' << static_cast<char>(byte);
+            } else if (byte < 0x20 || byte > 0x7e) {
+                out << "\\u00" << hex[byte >> 4] << hex[byte & 0xf];
+            } else {
+                out << static_cast<char>(byte);
+            }
+        }
+        out << '"';
+    }
+
     Config config_;
     Rules rules_;
     Stats stats_;
@@ -600,6 +627,7 @@ Options:
   --block-domain <dom>   Block domain (substring match)
   --lbs <n>              Number of load balancer threads (default: 2)
   --fps <n>              FP threads per LB (default: 2)
+  --report-json <path>   Write analysis statistics to a JSON file
 
 Example:
   )" << prog << R"( capture.pcap filtered.pcap --block-app YouTube --block-ip 192.168.1.50
@@ -616,6 +644,7 @@ int main(int argc, char* argv[]) {
     std::string output = argv[2];
     
     DPIEngine::Config cfg;
+    std::string report_path;
     std::vector<std::string> block_ips, block_apps, block_domains;
     
     for (int i = 3; i < argc; i++) {
@@ -624,6 +653,7 @@ int main(int argc, char* argv[]) {
         else if (arg == "--block-app" && i + 1 < argc) block_apps.push_back(argv[++i]);
         else if (arg == "--block-domain" && i + 1 < argc) block_domains.push_back(argv[++i]);
         else if (arg == "--lbs" && i + 1 < argc) cfg.num_lbs = std::stoi(argv[++i]);
+        else if (arg == "--report-json" && i + 1 < argc) report_path = argv[++i];
         else if (arg == "--fps" && i + 1 < argc) cfg.fps_per_lb = std::stoi(argv[++i]);
     }
     
@@ -637,6 +667,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    if (!report_path.empty() && !engine.writeJsonReport(report_path)) {
+        std::cerr << "Could not write the JSON report\n";
+        return 1;
+    }
+
     std::cout << "\nOutput written to: " << output << "\n";
     return 0;
 }

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DPI · Capture Workbench</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell identity"><span class="mark" aria-hidden="true">DPI</span><span>Capture Workbench</span></div>
+  </header>
+  <main class="shell">
+    <div class="intro">
+      <div><h1>Deep Packet Inspection</h1><p>Inspect recorded traffic and export a filtered capture.</p></div>
+      <span class="local"><span aria-hidden="true"></span> Local analysis</span>
+    </div>
+    <div class="workspace">
+      <form id="analysis" class="panel controls">
+        <fieldset id="inputs">
+          <legend>Capture setup</legend>
+          <label id="drop" class="drop" for="capture">
+            <span class="file-mark" aria-hidden="true">↑</span>
+            <strong id="file-name">Choose or drop a PCAP</strong>
+            <span id="file-size">Ethernet PCAP · up to 16 MiB</span>
+            <input id="capture" type="file" accept=".pcap">
+          </label>
+          <div class="rules">
+            <h2>Blocking rules <small>Optional</small></h2>
+            <label for="ip">Source IPv4</label>
+            <input id="ip" name="ip" placeholder="192.168.1.50" maxlength="15" spellcheck="false">
+            <label for="app">Application</label>
+            <select id="app" name="app">
+              <option value="">Any application</option>
+              <option>Amazon</option><option>Apple</option><option>Cloudflare</option><option>Discord</option>
+              <option>DNS</option><option>Facebook</option><option>GitHub</option><option>Google</option>
+              <option>HTTP</option><option>HTTPS</option><option>Instagram</option><option>Microsoft</option>
+              <option>Netflix</option><option>QUIC</option><option>Spotify</option><option>Telegram</option>
+              <option>TikTok</option><option>TLS</option><option>Twitter/X</option><option>Unknown</option>
+              <option>WhatsApp</option><option>YouTube</option><option>Zoom</option>
+            </select>
+            <label for="domain">Domain contains</label>
+            <input id="domain" name="domain" placeholder="youtube.com" maxlength="253" spellcheck="false">
+          </div>
+          <button class="primary" id="run" type="submit">Analyze capture <span aria-hidden="true">→</span></button>
+          <button class="secondary" id="sample" type="button">Analyze sample capture</button>
+        </fieldset>
+        <p id="status" class="status" role="status" hidden></p>
+      </form>
+      <section class="results" aria-labelledby="results-heading">
+        <div class="results-head">
+          <div><h2 id="results-heading">Analysis results</h2><p id="result-source">Select a PCAP or run the bundled sample.</p></div>
+          <a id="download" class="download" download="filtered.pcap" hidden>Download PCAP <span aria-hidden="true">↓</span></a>
+        </div>
+        <dl class="metrics">
+          <div class="panel"><dt>Packets analyzed</dt><dd id="total">—</dd></div>
+          <div class="panel"><dt>Forwarded</dt><dd id="forwarded">—</dd></div>
+          <div class="panel"><dt>Blocked</dt><dd id="dropped">—</dd></div>
+          <div class="panel"><dt>Traffic volume</dt><dd id="bytes">—</dd></div>
+        </dl>
+        <section class="panel report">
+          <div class="report-head"><h3>Application breakdown</h3><span id="protocols"></span></div>
+          <p id="apps-empty" class="empty">Application counts will appear here.</p>
+          <ul id="applications" class="applications" aria-label="Application packet counts"></ul>
+        </section>
+        <section class="panel report">
+          <div class="report-head"><h3>Detected domains</h3><span>TLS SNI / HTTP Host</span></div>
+          <p id="domains-empty" class="empty">Detected hostnames will appear here.</p>
+          <div id="domain-table" class="table-wrap" hidden>
+            <table><thead><tr><th scope="col">Hostname</th><th scope="col">Application</th></tr></thead><tbody id="domains"></tbody></table>
+          </div>
+        </section>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
